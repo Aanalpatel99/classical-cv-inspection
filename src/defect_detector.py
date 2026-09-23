@@ -44,12 +44,12 @@ class WireDefectInspector:
         test_blurred = self._preprocess(testImg)
         thresh = self._compute_diff(test_blurred)    
         contours= self._find_defects(thresh)
+        signed_diff = test_blurred.astype(np.int16) - self.ref_blurred  # >0: test brighter than reference
         defects = []
         for contour in contours:
             area = cv2.contourArea(contour)
             if area > self.min_defect_size:
-                x, y, w, h = cv2.boundingRect(contour)
-                defects.append({"area": area, "x": x, "y": y, "w": w, "h": h})
+                defects.append(self._describe(contour, area, signed_diff))
 
         defect_img = self.return_defect_image(contours, testImg)
 
@@ -61,6 +61,20 @@ class WireDefectInspector:
             "aligned": self.aligned
         }
     
+    def _describe(self, contour, area, signed_diff):
+        x, y, w, h = cv2.boundingRect(contour)
+        perimeter = cv2.arcLength(contour, True)
+        (_, _), (side_a, side_b), _ = cv2.minAreaRect(contour)  # rotated box, so a diagonal line still reads as long and thin
+        # mean brightness change over the defect: positive = extra material/brighter, negative = missing/darker
+        mask = np.zeros((h, w), np.uint8)
+        cv2.drawContours(mask, [contour], -1, 255, -1, offset=(-x, -y))
+        return {
+            "area": area, "x": x, "y": y, "w": w, "h": h,
+            "circularity": 4 * np.pi * area / perimeter ** 2 if perimeter > 0 else 0.0,  # 1.0 = perfect circle
+            "aspect_ratio": max(side_a, side_b) / max(min(side_a, side_b), 1.0),
+            "polarity": float(signed_diff[y:y + h, x:x + w][mask > 0].mean()),
+        }
+
     def _median(self, img):
         if self.denoise == "gaussian":
             return img
