@@ -1,36 +1,16 @@
 """Step 4: simulated line-scan wire inspection. Run with: python demo_strip.py"""
-from collections import defaultdict
-
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Rectangle
 
 from src.defect_detector import WireDefectInspector
-from src.strip import CHUNK_W, DEFECT_TYPES, OVERLAP, inspect_strip, make_strip, make_wire, match_detections
+from src.strip import (CHUNK_W, DEFECT_TYPES, OVERLAP, evaluate_strips, inspect_strip, make_strip, make_wire,
+                       match_detections)
 
 COLORS = {"pinhole": "cyan", "scratch": "yellow", "lump": "magenta", "neckdown": "orange", "unknown": "red"}
 # threshold 20, not the default 30: 2px diagonal scratches are faint after blurring (see the evaluation below)
 STRIP_SETTINGS = dict(threshold=20)
-
-
-def evaluate(n_strips, sigma, settings):
-    """Run n_strips random strips; return (missed, false positives, confusion counts, features per true type)."""
-    inspector = WireDefectInspector(make_wire(), **settings)
-    missed = false_pos = 0
-    confusion = defaultdict(int)
-    features = defaultdict(list)
-    for seed in range(n_strips):
-        strip, truth = make_strip(seed=seed, noise_sigma=sigma)
-        pairs, extra = match_detections(inspect_strip(strip, inspector), truth)
-        false_pos += len(extra)
-        for t, d in pairs:
-            if d is None:
-                missed += 1
-                continue
-            confusion[(t["type"], d["type"])] += 1
-            features[t["type"]].append([d["area"], d["circularity"], d["aspect_ratio"], d["polarity"]])
-    return missed, false_pos, confusion, features
 
 
 def main():
@@ -62,7 +42,7 @@ def main():
     fig.savefig("demo_strip.png", dpi=100)
 
     n_strips = 30
-    _, _, confusion, features = evaluate(n_strips, 0, STRIP_SETTINGS)
+    features = evaluate_strips(n_strips, STRIP_SETTINGS)["features"]
     print(f"\nFEATURES the classifier sees (min .. max over {sum(len(v) for v in features.values())} detected defects)")
     print(f"{'true type':10s}{'area':>16s}{'circularity':>16s}{'aspect ratio':>16s}{'polarity':>18s}")
     for k in DEFECT_TYPES:
@@ -77,13 +57,13 @@ def main():
     for sigma in [0, 3, 6, 10]:
         row = f"{sigma:>12d}"
         for kwargs in settings.values():
-            missed, false_pos, conf, _ = evaluate(n_strips, sigma, kwargs)
-            wrong = sum(n for (true, pred), n in conf.items() if true != pred)
-            row += f"{f'{missed} | {false_pos} | {wrong}':>22s}"
+            r = evaluate_strips(n_strips, kwargs, noise_sigma=sigma)
+            cell = f"{r['missed']} | {r['false_pos']} | {r['wrong']}"
+            row += f"{cell:>22s}"
         print(row)
 
     print("\nCONFUSION at noise sigma 10, threshold=20 (rows: true type, columns: classified as)")
-    _, _, conf, _ = evaluate(n_strips, 10, STRIP_SETTINGS)
+    conf = evaluate_strips(n_strips, STRIP_SETTINGS, noise_sigma=10)["confusion"]
     print(f"{'':10s}" + "".join(f"{t:>10s}" for t in DEFECT_TYPES))
     for true in DEFECT_TYPES:
         print(f"{true:10s}" + "".join(f"{conf[(true, pred)]:>10d}" for pred in DEFECT_TYPES))

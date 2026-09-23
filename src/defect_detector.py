@@ -4,7 +4,7 @@ import numpy as np
 class WireDefectInspector:
     def __init__(self, refImg, threshold=30, min_defect_size=20, contour_color=(0, 255, 0), contour_thickness=2, blur_kernel=(5, 5), morph_kernel=(3, 3),
                  threshold_mode="fixed", use_clahe=False, normalize_illumination=False, illum_ksize=101,
-                 align=None, align_search=20, denoise="gaussian", median_ksize=3):
+                 align=None, align_search=20, lock_x=False, denoise="gaussian", median_ksize=3):
         if threshold_mode not in ("fixed", "otsu", "adaptive"):
             raise ValueError(f"threshold_mode must be 'fixed', 'otsu' or 'adaptive', got {threshold_mode!r}")
         if align not in (None, "template", "ecc"):
@@ -27,6 +27,9 @@ class WireDefectInspector:
         self.illum_ksize = illum_ksize
         self.align = align
         self.align_search = align_search
+        # For stock that looks the same at every x (wire, tape), nothing pins down the x position, so the
+        # alignment drifts sideways and shifts the reported defect positions. lock_x=True only corrects y and rotation.
+        self.lock_x = lock_x
         self.aligned = None  # did the last inspect() find an alignment? (None if align is off)
         self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)) if use_clahe else None
         
@@ -100,6 +103,8 @@ class WireDefectInspector:
             scores = cv2.matchTemplate(gray, template, cv2.TM_CCOEFF_NORMED)
             _, _, _, (x, y) = cv2.minMaxLoc(scores)
             warp = np.float32([[1, 0, pad - x], [0, 1, pad - y]])
+            if self.lock_x:
+                warp[0, 2] = 0
             return cv2.warpAffine(img, warp, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
         # "ecc": translation + rotation, subpixel. Iterative, so it needs a starting point
@@ -113,6 +118,8 @@ class WireDefectInspector:
             # part fails safe as Defective; self.aligned tells you why.
             self.aligned = False
             return img
+        if self.lock_x:
+            warp[0, 2] = 0
         return cv2.warpAffine(img, warp, (w, h), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
                               borderMode=cv2.BORDER_REPLICATE)
 
