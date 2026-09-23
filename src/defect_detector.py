@@ -4,12 +4,18 @@ import numpy as np
 class WireDefectInspector:
     def __init__(self, refImg, threshold=30, min_defect_size=20, contour_color=(0, 255, 0), contour_thickness=2, blur_kernel=(5, 5), morph_kernel=(3, 3),
                  threshold_mode="fixed", use_clahe=False, normalize_illumination=False, illum_ksize=101,
-                 align=None, align_search=20):
+                 align=None, align_search=20, denoise="gaussian", median_ksize=3):
         if threshold_mode not in ("fixed", "otsu", "adaptive"):
             raise ValueError(f"threshold_mode must be 'fixed', 'otsu' or 'adaptive', got {threshold_mode!r}")
         if align not in (None, "template", "ecc"):
             raise ValueError(f"align must be None, 'template' or 'ecc', got {align!r}")
-        self.refImg = refImg
+        if denoise not in ("gaussian", "median", "median+gaussian"):
+            raise ValueError(f"denoise must be 'gaussian', 'median' or 'median+gaussian', got {denoise!r}")
+        self.denoise = denoise
+        self.median_ksize = median_ksize
+        # The reference gets the same median filter as every test image, so the filter's
+        # side effects (it rounds corners and erases 1px features) cancel out in the diff.
+        self.refImg = self._median(refImg)
         self.threshold = threshold
         self.min_defect_size = min_defect_size
         self.contour_color = contour_color
@@ -30,6 +36,10 @@ class WireDefectInspector:
         self.ref_blurred = self._gray_to_blurred(gray_ref, match_illumination=False)
 
     def inspect(self, testImg):
+        # Median first: alignment resamples the image, which would smear each noise speck
+        # into a bigger blob that the median can no longer remove. Note that the returned
+        # defect_img is drawn on this denoised (and aligned) image, not on the raw input.
+        testImg = self._median(testImg)
         testImg = self._align_to_reference(testImg)  # no-op unless align is set
         test_blurred = self._preprocess(testImg)
         thresh = self._compute_diff(test_blurred)    
@@ -51,6 +61,11 @@ class WireDefectInspector:
             "aligned": self.aligned
         }
     
+    def _median(self, img):
+        if self.denoise == "gaussian":
+            return img
+        return cv2.medianBlur(img, self.median_ksize)
+
     def _preprocess(self, img):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         return self._gray_to_blurred(gray, match_illumination=True)
@@ -104,6 +119,8 @@ class WireDefectInspector:
             gray = np.clip(gray * gain, 0, 255).astype(np.uint8)
         if self.clahe is not None:
             gray = self.clahe.apply(gray)
+        if self.denoise == "median":
+            return gray  # the median filter already smoothed it
         return cv2.GaussianBlur(gray, self.blur_kernel, 0)
     
     def _compute_diff(self, test_blurred):

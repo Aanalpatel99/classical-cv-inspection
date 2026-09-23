@@ -65,3 +65,24 @@ def score_detections(defects, truth=TRUE_DEFECT_BOXES, min_iou=0.3):
     found = sum(any(iou(t, b) >= min_iou for b in boxes) for t in truth)
     false_positives = sum(not any(iou(t, b) >= min_iou for t in truth) for b in boxes)
     return found, false_positives
+
+
+def add_salt_and_pepper(img, density=0.05, seed=None):
+    """Set a random `density` fraction of pixels to pure black (pepper) or pure white (salt), half each."""
+    rng = np.random.default_rng(seed)
+    r = rng.random(img.shape[:2])
+    out = img.copy()
+    out[r < density / 2] = 0
+    out[(r >= density / 2) & (r < density)] = 255
+    return out
+
+
+# Small real defects, each with the (x, y, w, h) box it should be detected in.
+# Used to check whether a smoothing filter erases things we care about.
+SMALL_DEFECTS = {
+    "2px line, 30 long": (lambda t: cv2.line(t, (400, 100), (400, 130), (255, 255, 255), 2), (399, 99, 3, 32)),
+    "1px line, 30 long": (lambda t: cv2.line(t, (400, 100), (400, 130), (255, 255, 255), 1), (399, 99, 2, 32)),
+    "2px line, 10 long": (lambda t: cv2.line(t, (400, 100), (400, 110), (255, 255, 255), 2), (399, 99, 3, 12)),
+    "dot, radius 3":     (lambda t: cv2.circle(t, (300, 100), 3, (255, 255, 255), -1), (296, 96, 9, 9)),
+    "dot, radius 2":     (lambda t: cv2.circle(t, (300, 100), 2, (255, 255, 255), -1), (297, 97, 7, 7)),
+}

@@ -2,7 +2,8 @@ import cv2
 import matplotlib.pyplot as plt
 
 from src.defect_detector import WireDefectInspector
-from src.utils import apply_lighting_gradient, make_reference, make_test, misalign, score_detections
+from src.utils import (SMALL_DEFECTS, add_salt_and_pepper, apply_lighting_gradient, make_reference,
+                       make_test, misalign, score_detections)
 
 
 def show(ax, img_bgr, title):
@@ -116,11 +117,99 @@ def alignment_demo(ref):
     fig.savefig("demo_alignment.png", dpi=100)
 
 
+def noise_demo(ref, n_patterns=10):
+    """Salt-and-pepper noise: when does the default Gaussian pipeline break, and what does a median filter cost?"""
+    methods = {
+        "gaussian (default)": dict(),
+        "median 3x3": dict(denoise="median", min_defect_size=8),
+        "median 3x3 + gaussian": dict(denoise="median+gaussian", min_defect_size=8),
+    }
+    clean_base = make_test(ref, False, False, False, False)
+    defect_base = make_test(ref)
+    seeds = range(n_patterns)
+
+    print(f"\nNOISE, part 1: density sweep (averages over {n_patterns} random noise patterns)")
+    print("  each cell: false positives on a clean part | real defects found (of 3), false positives on a defective part")
+    print(f"{'density':>9s}" + "".join(f"{name:>36s}" for name in methods))
+    for density in [0.0, 0.02, 0.05, 0.10, 0.15]:
+        row = f"{density:>8.0%} "
+        for kwargs in methods.values():
+            inspector = WireDefectInspector(ref, **kwargs)
+            clean_fp = found = defect_fp = 0
+            for seed in seeds:
+                clean_fp += len(inspector.inspect(add_salt_and_pepper(clean_base, density, seed))["defects"])
+                f, fp = score_detections(inspector.inspect(add_salt_and_pepper(defect_base, density, seed))["defects"])
+                found += f
+                defect_fp += fp
+            n = n_patterns
+            row += f"{f'{clean_fp / n:.1f} | {found / n:.1f}/3, {defect_fp / n:.1f}':>36s}"
+        print(row)
+
+    print(f"\nNOISE, part 2: small real defects (found in how many of {n_patterns} noise patterns)")
+    small_methods = {
+        "gaussian": dict(),
+        "median, min 20": dict(denoise="median"),
+        "median, min 8": dict(denoise="median", min_defect_size=8),
+        "median+gauss, min 8": dict(denoise="median+gaussian", min_defect_size=8),
+    }
+    for density in [0.0, 0.10]:
+        print(f"  noise density {density:.0%}")
+        print(f"  {'defect':22s}" + "".join(f"{name:>22s}" for name in small_methods))
+        for label, (draw, truth_box) in SMALL_DEFECTS.items():
+            row = f"  {label:22s}"
+            for kwargs in small_methods.values():
+                inspector = WireDefectInspector(ref, **kwargs)
+                hits = 0
+                for seed in seeds:
+                    test = ref.copy()
+                    draw(test)
+                    if density:
+                        test = add_salt_and_pepper(test, density, seed)
+                    hits += score_detections(inspector.inspect(test)["defects"], truth=[truth_box])[0]
+                row += f"{f'{hits}/{n_patterns}':>22s}"
+            print(row)
+
+    print(f"\nNOISE, part 3: 10% noise AND part shifted (4, -3) px + rotated 2 deg, aligned with ECC")
+    combos = {
+        "gaussian": dict(align="ecc"),
+        "median 3x3 + gaussian": dict(align="ecc", denoise="median+gaussian", min_defect_size=8),
+    }
+    for name, kwargs in combos.items():
+        inspector = WireDefectInspector(ref, **kwargs)
+        clean_fp = found = defect_fp = 0
+        for seed in seeds:
+            clean_img = add_salt_and_pepper(misalign(clean_base, 4, -3, 2), 0.10, seed)
+            defect_img = add_salt_and_pepper(misalign(defect_base, 4, -3, 2), 0.10, seed)
+            clean_fp += len(inspector.inspect(clean_img)["defects"])
+            f, fp = score_detections(inspector.inspect(defect_img)["defects"])
+            found += f
+            defect_fp += fp
+        n = n_patterns
+        print(f"  {name:24s} clean: {clean_fp / n:5.1f} false pos | defective: {found / n:.1f}/3 found, {defect_fp / n:5.1f} false pos")
+
+    # picture: one noise pattern at 10%
+    noisy_clean = add_salt_and_pepper(clean_base, 0.10, 0)
+    noisy_defect = add_salt_and_pepper(defect_base, 0.10, 0)
+    fig, axs = plt.subplots(2, len(methods) + 1, figsize=(4 * (len(methods) + 1), 5.2))
+    show(axs[0][0], noisy_clean, "input: clean part + 10% noise")
+    show(axs[1][0], noisy_defect, "input: defective part + 10% noise")
+    for col, (name, kwargs) in enumerate(methods.items(), start=1):
+        inspector = WireDefectInspector(ref, **kwargs)
+        c = inspector.inspect(noisy_clean)
+        d = inspector.inspect(noisy_defect)
+        found, defect_fp = score_detections(d["defects"])
+        show(axs[0][col], c["defect_img"], f"{name}\nclean: {len(c['defects'])} false positive(s)")
+        show(axs[1][col], d["defect_img"], f"defective: {found}/3 found, {defect_fp} false pos.")
+    fig.tight_layout()
+    fig.savefig("demo_noise.png", dpi=100)
+
+
 def main():
     ref = make_reference()
     basic_demo(ref)
     lighting_demo(ref)
     alignment_demo(ref)
+    noise_demo(ref)
     plt.show()
 
 
