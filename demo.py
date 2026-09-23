@@ -2,17 +2,17 @@ import cv2
 import matplotlib.pyplot as plt
 
 from src.defect_detector import WireDefectInspector
-from src.utils import make_reference, make_test
+from src.utils import apply_lighting_gradient, make_reference, make_test
 
 
 def show(ax, img_bgr, title):
     ax.imshow(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
-    ax.set_title(title)
+    ax.set_title(title, fontsize=9)
     ax.axis("off")
 
 
-def main():
-    ref = make_reference()
+def basic_demo(ref):
+    """Clean / noise-only / defective parts under the reference lighting."""
     inspector = WireDefectInspector(ref)
 
     cases = {
@@ -30,8 +30,44 @@ def main():
         show(axs[row][0], test, f"{name} - test image")
         show(axs[row][1], result["defect_img"], f"Result: {result['status']}")
 
-    plt.tight_layout()
-    plt.savefig("demo_output.png", dpi=100)
+    fig.tight_layout()
+    fig.savefig("demo_output.png", dpi=100)
+
+
+def lighting_demo(ref, left=0.7, right=1.3):
+    """Same parts, but lit unevenly. Which preprocessing keeps the clean part clean and still finds the defects?"""
+    methods = {
+        "fixed threshold": dict(),
+        "Otsu": dict(threshold_mode="otsu"),
+        "adaptive": dict(threshold_mode="adaptive"),
+        "fixed + CLAHE": dict(use_clahe=True),
+        "fixed + illumination\nnormalization": dict(normalize_illumination=True),
+    }
+    parts = {
+        "clean": apply_lighting_gradient(make_test(ref, False, False, False, False), left, right),
+        "defective": apply_lighting_gradient(make_test(ref), left, right),
+    }
+
+    print(f"\nLighting gradient {left}-{right}  (real defects in the defective part: 3)")
+    print(f"{'method':38s}{'clean part':>12s}{'defective part':>16s}")
+    fig, axs = plt.subplots(len(parts), len(methods), figsize=(4 * len(methods), 2.6 * len(parts)))
+    for col, (name, kwargs) in enumerate(methods.items()):
+        inspector = WireDefectInspector(ref, **kwargs)
+        found = {}
+        for row, (part, img) in enumerate(parts.items()):
+            result = inspector.inspect(img)
+            found[part] = len(result["defects"])
+            show(axs[row][col], result["defect_img"], f"{name.replace(chr(10), ' ')}\n{part}: {found[part]} defect(s)")
+        print(f"{name.replace(chr(10), ' '):38s}{found['clean']:>12d}{found['defective']:>16d}")
+
+    fig.tight_layout()
+    fig.savefig("demo_lighting.png", dpi=100)
+
+
+def main():
+    ref = make_reference()
+    basic_demo(ref)
+    lighting_demo(ref)
     plt.show()
 
 

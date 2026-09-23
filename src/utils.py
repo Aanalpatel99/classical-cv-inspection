@@ -32,3 +32,9 @@ def make_test(ref, big_defect=True, thin_line=True, short_line=True, noise_dots=
         for center in [(70, 70), (180, 60), (500, 135), (150, 120)]:
             cv2.circle(test, center, 1, white, -1)
     return test
+
+
+def apply_lighting_gradient(img, left=0.7, right=1.3):
+    """Simulate uneven lighting: scale brightness linearly from `left` to `right` across the width."""
+    gain = np.linspace(left, right, img.shape[1], dtype=np.float32)[None, :, None]
+    return np.clip(img.astype(np.float32) * gain, 0, 255).astype(np.uint8)
