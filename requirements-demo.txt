@@ -1,0 +1,4 @@
+# Everything needed to run the demo scripts (demo.py, demo_strip.py, demo_strip_hard.py,
+# 01_absdiff.py, 02_edge_detection.py). The library itself only needs requirements.txt.
+-r requirements.txt
+matplotlib==3.10.9

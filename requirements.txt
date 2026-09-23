@@ -1,3 +1,8 @@
-opencv-python
-numpy
-matplotlib
+# Runtime dependencies for the inspection library (src/).
+# Pinned to the versions the project was developed and tested with. Requires Python 3.10+.
+#
+# The headless OpenCV build is used because nothing here opens an OpenCV window
+# (no cv2.imshow); it avoids pulling GUI libraries into servers and containers.
+# Do not install it alongside opencv-python: the two packages overwrite each other.
+opencv-python-headless==4.13.0.92
+numpy==2.2.6
